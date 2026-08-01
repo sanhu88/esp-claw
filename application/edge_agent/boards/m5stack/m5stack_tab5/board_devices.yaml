@@ -174,7 +174,7 @@ devices:
         y_max: 1280                        # Maximum Y coordinate (BSP_LCD_V_RES)
     peripherals:
       - name: i2c_master
-        i2c_addr: [0x28, 0x55]                    # GT911 I2C address (8-bit: 0x14 << 1), ST7123 I2C address
+        i2c_addr: [0x28, 0xAA]                    # GT911 I2C address (8-bit: 0x14 << 1), ST7123 I2C address
 
   - name: camera
     type: camera
