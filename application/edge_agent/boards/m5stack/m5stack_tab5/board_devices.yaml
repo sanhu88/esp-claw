@@ -107,6 +107,9 @@ devices:
     chip: tab5_lcd
     type: display_lcd
     sub_type: dsi
+    depends_on:
+      - gpio_expander
+      - touch_power_ctrl
     dependencies:
       espressif/esp_lcd_ili9881c: "*"
       espressif/esp_lcd_st7123: "*"
@@ -123,11 +126,9 @@ devices:
       dpi_config:
         virtual_channel: 0
         dpi_clk_src: MIPI_DSI_DPI_CLK_SRC_DEFAULT
-        dpi_clock_freq_mhz: 60
-        # pixel_format: LCD_COLOR_PIXEL_FORMAT_RGB565
+        dpi_clock_freq_mhz: 78
         in_color_format: LCD_COLOR_FMT_RGB565
-        # out_color_format: LCD_COLOR_FMT_RGB565
-        num_fbs: 1
+        num_fbs: 2
         flags:
           use_dma2d: true
           # disable_lp: false
@@ -140,18 +141,19 @@ devices:
           vsync_back_porch : 20
           vsync_pulse_width : 4
           vsync_front_porch : 20
-      peripherals:
+    peripherals:
       - name: ldo_mipi
       - name: dsi_display
+      - name: gpio_expander
+        i2c_addr: 0x86
 
   # Power Control for Touch Panel
   - name: touch_power_ctrl
     type: power_ctrl
     sub_type: gpio
-    config:
-      peripherals:
-        - name: gpio_power_touch
-          active_level: 0
+    peripherals:
+      - name: gpio_power_touch
+        active_level: 0
 
   # Touch Panel Configuration
   - name: lcd_touch
@@ -159,6 +161,9 @@ devices:
     type: lcd_touch
     sub_type: i2c
     power_ctrl_device: touch_power_ctrl
+    depends_on:
+      - touch_power_ctrl
+      - gpio_expander
     version: default
     dependencies:
       espressif/esp_lcd_touch_gt911: "*"

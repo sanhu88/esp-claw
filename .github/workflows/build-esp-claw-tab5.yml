@@ -1,4 +1,4 @@
-name: Build ESP-Claw for M5Stack Tab5
+name: Build ESP-Claw for M5Stack Tab5 (ST7123)
 
 on:
   push:
@@ -16,8 +16,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      # ESP-IDF v5.5.4 官方镜像
-      # 如果该精确标签不存在，可改为 v5.5 或 release-v5.5
       image: espressif/idf:v5.5.4
 
     steps:
@@ -30,6 +28,179 @@ jobs:
         run: |
           . $IDF_PATH/export.sh
           pip install esp-bmgr-assist
+
+      # ============================================================
+      # FIX 1: I2C address format (0x55 -> 0xAA for 8-bit left-shifted)
+      # ============================================================
+      - name: Fix board_devices.yaml i2c_addr
+        run: |
+          YAML_FILE="application/edge_agent/boards/m5stack/m5stack_tab5/board_devices.yaml"
+          echo "=== Before i2c_addr fix ==="
+          grep -n -i "i2c_addr" "$YAML_FILE" || true
+          sed -i 's/0x55/0xAA/g' "$YAML_FILE"
+          echo "=== After i2c_addr fix ==="
+          grep -n -i "i2c_addr" "$YAML_FILE" || true
+
+      # ============================================================
+      # FIX 2: num_fbs 1 -> 2 (ST7123 DPI requires 2 frame buffers)
+      # ============================================================
+      - name: Fix num_fbs for ST7123
+        run: |
+          YAML_FILE="application/edge_agent/boards/m5stack/m5stack_tab5/board_devices.yaml"
+          echo "=== Before num_fbs fix ==="
+          grep -n "num_fbs" "$YAML_FILE" || true
+          sed -i 's/num_fbs: 1/num_fbs: 2/' "$YAML_FILE"
+          echo "=== After num_fbs fix ==="
+          grep -n "num_fbs" "$YAML_FILE" || true
+
+      # ============================================================
+      # FIX 3: dpi_clock_freq_mhz 60 -> 78 (recommended for ST7123)
+      # ============================================================
+      - name: Fix dpi_clock_freq_mhz
+        run: |
+          YAML_FILE="application/edge_agent/boards/m5stack/m5stack_tab5/board_devices.yaml"
+          echo "=== Before clock fix ==="
+          grep -n "dpi_clock_freq_mhz" "$YAML_FILE" || true
+          sed -i 's/dpi_clock_freq_mhz: 60/dpi_clock_freq_mhz: 78/' "$YAML_FILE"
+          echo "=== After clock fix ==="
+          grep -n "dpi_clock_freq_mhz" "$YAML_FILE" || true
+
+      # ============================================================
+      # FIX 4: touch_power_ctrl peripherals move from config to device level
+      # ============================================================
+      - name: Fix touch_power_ctrl peripherals nesting
+        run: |
+          YAML_FILE="application/edge_agent/boards/m5stack/m5stack_tab5/board_devices.yaml"
+          echo "=== Before power_ctrl fix ==="
+          sed -n '/touch_power_ctrl/,/lcd_touch/p' "$YAML_FILE" || true
+
+          # Use Python for reliable YAML editing
+          python3 << 'PYEOF'
+          import re
+
+          with open("application/edge_agent/boards/m5stack/m5stack_tab5/board_devices.yaml", "r") as f:
+              content = f.read()
+
+          # Fix: move peripherals out of config for touch_power_ctrl
+          old_block = '''  - name: touch_power_ctrl
+    type: power_ctrl
+    sub_type: gpio
+    config:
+      peripherals:
+        - name: gpio_power_touch
+          active_level: 0'''
+
+          new_block = '''  - name: touch_power_ctrl
+    type: power_ctrl
+    sub_type: gpio
+    peripherals:
+      - name: gpio_power_touch
+        active_level: 0'''
+
+          content = content.replace(old_block, new_block)
+
+          with open("application/edge_agent/boards/m5stack/m5stack_tab5/board_devices.yaml", "w") as f:
+              f.write(content)
+          PYEOF
+
+          echo "=== After power_ctrl fix ==="
+          sed -n '/touch_power_ctrl/,/lcd_touch/p' "$YAML_FILE" || true
+
+      # ============================================================
+      # FIX 5: Add depends_on and gpio_expander peripheral to display_lcd
+      # ============================================================
+      - name: Fix display_lcd dependencies
+        run: |
+          YAML_FILE="application/edge_agent/boards/m5stack/m5stack_tab5/board_devices.yaml"
+
+          python3 << 'PYEOF'
+          with open("application/edge_agent/boards/m5stack/m5stack_tab5/board_devices.yaml", "r") as f:
+              content = f.read()
+
+          # Add depends_on after sub_type: dsi
+          old_display = '''  - name: display_lcd
+    chip: tab5_lcd
+    type: display_lcd
+    sub_type: dsi
+    dependencies:'''
+
+          new_display = '''  - name: display_lcd
+    chip: tab5_lcd
+    type: display_lcd
+    sub_type: dsi
+    depends_on:
+      - gpio_expander
+      - touch_power_ctrl
+    dependencies:'''
+
+          content = content.replace(old_display, new_display)
+
+          # Add gpio_expander to peripherals list
+          old_periph = '''    peripherals:
+      - name: ldo_mipi
+      - name: dsi_display'''
+
+          new_periph = '''    peripherals:
+      - name: ldo_mipi
+      - name: dsi_display
+      - name: gpio_expander
+        i2c_addr: 0x86'''
+
+          content = content.replace(old_periph, new_periph)
+
+          with open("application/edge_agent/boards/m5stack/m5stack_tab5/board_devices.yaml", "w") as f:
+              f.write(content)
+          PYEOF
+
+      # ============================================================
+      # FIX 6: Add depends_on to lcd_touch
+      # ============================================================
+      - name: Fix lcd_touch dependencies
+        run: |
+          YAML_FILE="application/edge_agent/boards/m5stack/m5stack_tab5/board_devices.yaml"
+
+          python3 << 'PYEOF'
+          with open("application/edge_agent/boards/m5stack/m5stack_tab5/board_devices.yaml", "r") as f:
+              content = f.read()
+
+          old_touch = '''  - name: lcd_touch
+    chip: tab5_touch
+    type: lcd_touch
+    sub_type: i2c
+    power_ctrl_device: touch_power_ctrl
+    version: default'''
+
+          new_touch = '''  - name: lcd_touch
+    chip: tab5_touch
+    type: lcd_touch
+    sub_type: i2c
+    power_ctrl_device: touch_power_ctrl
+    depends_on:
+      - touch_power_ctrl
+      - gpio_expander
+    version: default'''
+
+          content = content.replace(old_touch, new_touch)
+
+          with open("application/edge_agent/boards/m5stack/m5stack_tab5/board_devices.yaml", "w") as f:
+              f.write(content)
+          PYEOF
+
+      - name: Verify final board_devices.yaml
+        run: |
+          YAML_FILE="application/edge_agent/boards/m5stack/m5stack_tab5/board_devices.yaml"
+          echo "=== num_fbs ==="
+          grep -n "num_fbs" "$YAML_FILE"
+          echo "=== dpi_clock_freq_mhz ==="
+          grep -n "dpi_clock_freq_mhz" "$YAML_FILE"
+          echo "=== depends_on (display_lcd) ==="
+          sed -n '/name: display_lcd/,/dependencies:/p' "$YAML_FILE" | grep -A2 "depends_on"
+          echo "=== depends_on (lcd_touch) ==="
+          sed -n '/name: lcd_touch/,/version:/p' "$YAML_FILE" | grep -A2 "depends_on"
+          echo "=== touch_power_ctrl peripherals ==="
+          sed -n '/name: touch_power_ctrl/,/name: lcd_touch/p' "$YAML_FILE"
+          echo "=== display_lcd peripherals ==="
+          sed -n '/name: display_lcd/,/name: touch_power_ctrl/p' "$YAML_FILE" | grep -A5 "peripherals:"
 
       - name: Select board (M5Stack Tab5)
         working-directory: application/edge_agent
@@ -52,7 +223,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: esp-claw-m5stack-tab5-${{ github.sha }}
+          name: esp-claw-m5stack-tab5-st7123-${{ github.sha }}
           path: |
             application/edge_agent/build/bootloader/bootloader.bin
             application/edge_agent/build/partition_table/partition-table.bin
